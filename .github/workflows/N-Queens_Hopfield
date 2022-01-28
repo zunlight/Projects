@@ -1,0 +1,132 @@
+import numpy as np
+import time
+
+import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.animation import FuncAnimation
+from matplotlib import rc
+
+# equivalent to rcParams['animation.html'] = 'html5'
+rc('animation', html='html5')
+
+def squasher(u,gain):
+  V = 0.5*(1+np.tanh((u-0.5)*gain))
+
+  return V
+  
+nRows = 8
+nCols = 8
+
+### Set-up ###
+gain = 999 # this is the gain of the transfer function - BIG
+dt = 0.01
+nUnits = nRows * nCols
+L_hist = [] # empty list to hold the history of the energy function
+V_hist = [] # empty list to hold the history of the V external state
+u_hist = [] # empty list to hold the history of the U internal state
+
+# Initialize our U state randomly and then squash it to get V
+u = (np.random.rand(nRows,nCols)-0.5)*0.01+0.5;
+V = squasher(u,gain);
+u_hist.append(u);
+V_hist.append(V);
+
+# Specify our input current, all ones for now
+I = np.ones((nRows*nCols,1))
+
+Q = np.zeros((nRows,nCols,nRows,nCols));
+for i in range(nRows):
+    Q[i,:,i,:] = -1;
+#is the row is the same, its inhibitory (-1)
+for i in range(nCols):
+    Q[:,i,:,i] = -1;
+
+for i in range(nRows):
+  for j in range(nCols):
+    for k in range(nRows):
+      for l in range (nCols):
+        if abs(i-k) == abs(j-l): 
+          Q[i,j,k,l] = -1
+
+
+Q = Q.reshape(nUnits,nUnits);
+Q = Q * (1-np.eye(nUnits)); # zero the diagonal
+
+u = u.reshape(nUnits,1);
+V = V.reshape(nUnits,1);
+
+i=0;
+dL = np.inf;
+L_hist.append(np.inf);
+minL = np.inf;
+lastBigJump = i;
+min_dL = 0.0001;
+
+#I = np.ones((nRows*nCols,1))
+
+while (np.abs(dL) > min_dL or (L_hist[i] > minL)) or ((i-lastBigJump) < 100) :
+  i=i+1;
+
+  # Main Hopfield Update- notice that we include a noise term in the update!
+  #############################
+  du = -u + Q @ V + I;
+  u = u + du*dt + (np.random.rand(u.shape[0],u.shape[1])-0.5)*0.05;
+  V = squasher(u,gain);
+  #############################
+  
+  # Calculate the energy at each step.
+  L = -0.5 * np.sum(Q * (V @ V.T)) - np.sum(V*I);
+
+  # Append the "history" lists with the states at each timestep.
+  L_hist.append(L)
+  V_hist.append(V.reshape(nRows,nCols))
+  u_hist.append(u.reshape(nRows,nCols))
+
+  # 
+  dL = L_hist[i] - L_hist[i-1];
+  minL = np.min([minL,L]);
+  if np.abs(dL) > min_dL:
+      lastBigJump = i;
+
+nIters=i
+
+V = V_hist[-1].reshape(nRows,nCols)
+
+plt.imshow(V);
+
+plt.show()
+
+fig = plt.figure(figsize=(15,5))
+ax1 = plt.subplot(1,3,1)   
+ax2 = plt.subplot(1,3,2)
+ax3 = plt.subplot(1,3,3)
+
+ax1.set_title('u')
+ax2.set_title('V')
+ax3.set_title('L')
+
+ax3.set_xlim((1,nIters))
+ax3.set_ylim((np.min(L_hist[2:])-5,np.max(L_hist[2:])+5))
+
+im1 = ax1.imshow(u_hist[0],vmin=np.min(u_hist[-1]),vmax=np.max(u_hist[-1]));
+im2 = ax2.imshow(V_hist[0],vmin=np.min(V_hist[-1]),vmax=np.max(V_hist[-1]));
+line, = ax3.plot([],[]);
+
+
+def animate(i):
+    
+    im1.set_data(u_hist[i]);
+    im2.set_data(V_hist[i]);
+
+    if i >= 2:
+      line.set_data(np.arange(1,i),L_hist[1:i])
+    
+    return (im1,im2,line)
+
+anim = FuncAnimation(fig, animate, #init_func=init,
+                     frames=nIters, interval=40, 
+                     blit=True,repeat=False)
+
+from IPython.display import HTML
+HTML(anim.to_html5_video())
